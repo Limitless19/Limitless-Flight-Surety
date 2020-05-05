@@ -1,13 +1,18 @@
 import React, { Component } from 'react';
 import Web3 from 'web3';
 import logo from '../logo.png';
+import FlightSuretyApp from '../abis/FlightSuretyApp.json'
+import FlightSuretyData from '../abis/FlightSuretyData.json'
+import Navbar from './Navbar'
+import Main from './Main'
 import './App.css';
 
 class App extends Component {
 
-  async componentWillMount(){ //flutter init lifecycle method equivalent
+  async componentWillMount(){ // init lifecycle 
      await this.loadWeb3();
      await this.loadBlockchainAccounts();
+    //  await this.getFlights();
   }
 
   async loadWeb3(){
@@ -24,63 +29,125 @@ class App extends Component {
   async loadBlockchainAccounts(){
     const web3 = window.web3;
     const accounts = await web3.eth.getAccounts();
-    this.setState({account : accounts[0]});
+    this.setState({owner : accounts[0]});
+    console.log(`owner ${this.state.owner}`)
+
+    //load contract abis and addresses
+    
+    const networkId = await web3.eth.net.getId();
+    //FlightSuretyApp
+    const flightSuretyAppNetworkData = FlightSuretyApp.networks[networkId];
+    //FlightSuretySata
+    const flightSuretyNetworkData = FlightSuretyData.networks[networkId];
+
+
+    if(flightSuretyAppNetworkData && flightSuretyNetworkData ) {
+
+      const flightSuretyApp = new web3.eth.Contract(FlightSuretyApp.abi, flightSuretyAppNetworkData.address); // you can't for now use web3.eth.Contract in .js truffle test.
+      const flightSuretyData = new web3.eth.Contract(FlightSuretyData.abi, flightSuretyNetworkData.address);
+      this.setState({flightSuretyApp,flightSuretyData});
+      this.setState({ loading: false});
+      this.setState({web3});
+    } else {
+      window.alert('Marketplace contract not deployed to detected network.')
+    }
   }
 
   constructor(props){
    super(props);
    this.state = {
-     account: ''
+     account: '',
+     loading: true,
+     flights:'',
+     flightsCount:''
    }
+
+   //bind all methods.
+   this.buyInsurance = this.buyInsurance.bind(this)
+   this.requestPayout = this.requestPayout.bind(this)
+   this.getFlights = this.getFlights.bind(this)
+   this.getInsurances = this.getInsurances.bind(this);
   }
 
-  
+//this.state.flightSuretyApp.methods
+//this.state.flightSuretyData.methods
 
-  render() {
-    return (
+  async buyInsurance(){
+    console.log("buy insurance button clicked - get flights");
+     await this.getFlights();
+  }
+
+  requestPayout(){
+    console.log("Request payout button clicked");
+  }
+
+  async getFlights(){
+    
+    //get the flights from contract.
+    let flights = [];
+    this.setState({ loading: true })
+    let flightsCount = await this.state.flightSuretyApp.methods.getFlightsCount().call({from: this.state.owner});
+    console.log(`flightcounts ${flightsCount}`)
+    for (var i = 0; i < flightsCount; i++) {
+      const flight = await this.state.flightSuretyApp.methods.getFlight(i).call({ from: this.state.owner }); //map
+      console.log(flight)
+      flights.push(flight);
+  }
+  console.log(flights);
+
+  this.setState({flights})
+  this.setState({flightsCount})
+
+  await this.getInsurances(this.state.flights);
+  this.setState({ loading: false })
+
+  }
+
+  async getInsurances(flights){
+    //get insurances
+    let insurances = [];
+    flights.map(async (flight) => {
+      const insurance = await this.state.flightSuretyApp.methods
+          .getInsurance(flight.name)
+          .call({ from: this.state.owner });
+
+      if (insurance.amount !== "0"){
+         insurances.push({
+          amount: this.state.web3.utils.fromWei(insurance.amount, 'ether'),
+          payoutAmount: this.state.web3.utils.fromWei(insurance.payoutAmount, 'ether'),
+          state: insurance.state,
+          flight: flight
+      });
+      }
+  });
+  //
+
+  }
+
+   render() {
+      return (
       <div>
-        <nav className="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-          <a
-            className="navbar-brand col-sm-3 col-md-2 mr-0"
-            href="http://www.dappuniversity.com/bootcamp"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Dapp University
-          </a>
-        </nav>
+        <Navbar account={this.state.account} />
         <div className="container-fluid mt-5">
           <div className="row">
-            <main role="main" className="col-lg-12 d-flex text-center">
-              <div className="content mr-auto ml-auto">
-                <a
-                  href="http://www.dappuniversity.com/bootcamp"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img src={logo} className="App-logo" alt="logo" />
-                </a>
-                <h1>Dapp University Starter Kit</h1>
-                <p>
-                  Edit <code>src/components/App.js</code> and save to reload.
-                </p>
-                <a
-                  className="App-link"
-                  href="http://www.dappuniversity.com/bootcamp"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  LEARN BLOCKCHAIN <u><b>NOW! </b></u>
-                
-                </a>
-              <h6>{this.state.account}</h6>
-              </div>
+            <main role="main" className="col-lg-12 d-flex">
+              { this.state.loading
+                ? <div id="loader" className="text-center"><p className="text-center">Loading...</p></div>
+                : <Main  
+                   buyInsurance={this.buyInsurance}
+                   requestPayout = {this.requestPayout}
+                   flights = {this.state.flights}
+                   flightsCount = {this.state.flightsCount}
+                   />
+              }
             </main>
           </div>
         </div>
       </div>
     );
   }
+
+ 
 }
 
 export default App;
